@@ -620,6 +620,30 @@ fn a_mid_face_pick_between_two_free_ends_needs_from() {
     );
 }
 
+/// A runout shoulder is off unless asked for. With it, the inside stop is a plain neck, 1.5
+/// pitches long and just past the root, then one square step up to the shaft.
+#[test]
+fn a_runout_shoulder_is_optional() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 30, "body_name": "Part"}));
+    let e = s.execute("solid.thread", &json!({"face": [5, 0, 15], "designation": "M10", "length": 15, "from": [0, 0, 30], "shoulder": true}));
+    assert!(e.unwrap_err().to_string().contains("modelled thread"));
+    run(
+        &mut s,
+        "solid.thread",
+        json!({"face": [5, 0, 15], "designation": "M10", "length": 15, "from": [0, 0, 30], "modeled": true, "shoulder": true}),
+    );
+    let st = s.model.state();
+    let body = &st.body("Part").unwrap().body;
+    assert!(body.validity().is_empty());
+    let root = 5.0 - 5.0 * 1.5 * 3f64.sqrt() / 16.0;
+    let floor = root - 0.05 * 1.5;
+    let class = |p: Vec3| body.classify_point(p).unwrap();
+    assert_eq!(class(Vec3::new(4.9, 0.0, 14.0)), solidcraft_kernel::PointClass::Inside, "below the stop");
+    assert_eq!(class(Vec3::new((floor + 5.0) / 2.0, 0.0, 16.1)), solidcraft_kernel::PointClass::Outside, "in the neck");
+    assert_eq!(class(Vec3::new(floor * 0.5, 0.0, 16.1)), solidcraft_kernel::PointClass::Inside, "the neck keeps its core");
+}
+
 /// Up to a plane, or to a point's place along the axis, from the end given.
 #[test]
 fn a_thread_runs_up_to_a_plane_or_a_point() {

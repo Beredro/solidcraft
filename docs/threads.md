@@ -13,7 +13,8 @@ root radii (the ISO metric root radius, the buttress root radius R, DIN 405 knuc
 rounds) are not modelled. External threads are cut from the shaft's surface (a little past it, so
 no skin is left) down to the external thread's minor diameter; internal threads from the hole
 wall out to the internal thread's root. Pitch-diameter allowances and tolerance classes are not
-modelled: a modelled thread is the maximum-material design profile below.
+modelled: a modelled thread is the maximum-material design profile below. Printed Metric is that
+same metric profile shifted by a radial clearance (`clearance`); it is not a second form.
 
 | Form | `form` | Designation | Flanks | Depth | Crest flat | External minor | Internal minor, root |
 |---|---|---|---|---|---|---|---|
@@ -58,6 +59,45 @@ The square thread is refused: no current ISO, ASME or DIN standard defines one. 
 Handbook gives only historical proportions (depth and width P/2; the "modified square" 10°); the
 trapezoidal and Acme forms replaced it.
 
+## Printed metric
+
+The dialog lists **Printed Metric** directly after ISO metric. Both are `form: metric` (the
+parameter is omitted, metric being the default). Printed Metric stores `clearance`, a length in
+millimetres, and forces a modelled thread. Omit `clearance`, or set it to 0, and the solid is the
+basic profile. An older document has no field and loads as that.
+
+`c` moves the whole ISO 68-1 profile. An external crest and root move in by `c`; an internal crest
+and root move out by `c`. The designation stays the nominal size. M40x2 at `c = 0.2` finishes at
+major diameter 39.6 mm and minor diameter 37.4349 mm on a shaft, and at minor (crest) diameter
+38.2349 mm in a hole. The same `c` on both mating parts leaves a radial gap of `2c` between the
+flanks.
+
+The Tolerance row is shown only for Printed Metric. It writes the number, not a method name:
+
+| Method | `clearance` |
+|---|---|
+| FDM 0.4 mm nozzle | 0.20 mm |
+| FDM 0.25 mm nozzle | 0.15 mm |
+| FDM 0.6 mm nozzle | 0.30 mm |
+| FDM 0.8 mm nozzle | 0.40 mm |
+| Resin | 0.10 mm |
+| Custom | any length expression |
+
+Reopening a thread selects the preset whose number matches. Any other value, including an
+expression such as `0.2 mm`, is Custom. The other forms do not show the row and do not send
+`clearance`.
+
+A clearance is refused on a cosmetic thread and on a taper. A nominal external shaft is turned
+down to the cleared crest over the thread, then the groove is cut. A hole inside the cleared minor
+is bored out to it. A hole already as wide as the major is still narrowed: the "no wall" test uses
+the basic root, and the bore goes to the cleared minor. An external thread is cut on a plain
+cylinder of the selected face and seated back onto the body, so a hole through that face stays
+open and a square end still meets a shoulder. With the runout shoulder off, a length that
+stops inside the face is cut off there first. The helix is cut on that piece, so the end face
+sections the thread, and the plain shaft is joined back on. The groove ends on that one plane.
+`shoulder` skips that cut and uses the neck under Extent. A fade against a real shoulder still
+clears it.
+
 **Sizes.** Without a designation the thread takes the standard size that fits the face: a shaft
 its major diameter, a hole its drill (metric: the tap maker's drill, `docs/thread-catalogue.md`;
 the other forms: the internal minor diameter). Metric uses the ISO 261/262 coarse pitches (M1.6 to M56); trapezoidal and metric
@@ -87,9 +127,13 @@ whose corners reach past the root, a blind hole's bottom are not.
 - At a free end the groove runs out a pitch past the end, into the air.
 - At a closed end it stops with its section clear of the end: its centre as far inside as the
   section reaches that way, so it never cuts into the shoulder.
-- Inside the face it stops square. For a symmetric section a square stop inside material removes
-  exactly length / P turns (what the last section leaves uncut ahead of the stop, it cuts behind
-  it in mirror image).
+- Inside the face the groove stops square. `shoulder` (default off; modelled threads only, not
+  a taper) cuts a plain neck there instead: 1.5 pitches long, just past the root, then one
+  square step up to the full shaft. The neck is skipped when a runout already fades that end,
+  or the thread is too short to spare it. The dialog disables the checkbox while End is Fade.
+  With a print clearance and the shoulder left off, the shaft is cut off at the length, the
+  helix is cut on that piece, and the plain shaft is joined back. Turning the shoulder on
+  skips that cut at that end.
 
 A thread of some length starts at the end nearest `from`; without it, at the face's only free end;
 without one, at the end the `face` point lies within a third of the face of. A pick in the middle

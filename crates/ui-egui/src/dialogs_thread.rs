@@ -222,6 +222,20 @@ const STARTS_AT: &[&str] = &["None", "Chamfer"];
 /// (ISO 3508's runout).
 const ENDS_AT: &[&str] = &["thread.end_square", "ui.fade"];
 const FLANKS: &[(&str, SteepFlank)] = &[("End", SteepFlank::End), ("Start", SteepFlank::Start)];
+/// Form list index of Printed Metric, directly after ISO metric. It is the metric profile.
+const PRINTED: usize = 1;
+const PRINTED_METRIC: &str = "Printed Metric";
+/// Radial clearance (mm) Printed Metric starts from: a 0.4 mm FDM nozzle. ISO metric leaves the basic profile.
+const PRINTED_CLEARANCE: &str = "0.2";
+/// Printed Metric tolerances. The number is radial clearance in mm. Custom is last and keeps the typed value.
+const TOLERANCES: &[(&str, Option<&str>)] = &[
+    ("FDM 0.4 mm (0.20)", Some("0.2")),
+    ("FDM 0.25 mm (0.15)", Some("0.15")),
+    ("FDM 0.6 mm (0.30)", Some("0.3")),
+    ("FDM 0.8 mm (0.40)", Some("0.4")),
+    ("Resin (0.10)", Some("0.1")),
+    ("Custom", None),
+];
 
 /// The pick of the end the thread is measured from (`from`).
 const START_END: &str = "Start end (optional)";
@@ -281,6 +295,12 @@ pub struct Options {
     pub chamfer_angle: String,
     pub chamfer_depth: String,
     pub steep_flank: SteepFlank,
+    /// Radial print clearance, mm. Printed Metric sets 0.2. Every other form leaves this empty.
+    pub clearance: String,
+    /// Tolerance is Custom, so a typed number stays even when it equals a preset. Not saved.
+    pub custom_clearance: bool,
+    /// A plain neck where a length stops inside the face. Off unless asked for.
+    pub shoulder: bool,
 }
 
 impl Default for Options {
@@ -295,6 +315,9 @@ impl Default for Options {
             chamfer_angle: String::new(),
             chamfer_depth: String::new(),
             steep_flank: SteepFlank::default(),
+            clearance: String::new(),
+            custom_clearance: false,
+            shoulder: false,
         }
     }
 }
@@ -382,6 +405,86 @@ fn change_form(designation: &mut String, suggested: &mut Option<String>, from: T
     }
 }
 
+/// ISO metric, then Printed Metric, then the other forms. Printed Metric is not its own
+/// [`ThreadForm`]: it is the metric profile with [`PRINTED_CLEARANCE`].
+fn form_labels() -> Vec<&'static str> {
+    let mut labels = Vec::with_capacity(FORMS.len() + 1);
+    labels.push(FORMS[0].0);
+    labels.push(PRINTED_METRIC);
+    labels.extend(FORMS.iter().skip(1).map(|(name, _)| *name));
+    labels
+}
+
+fn form_index(o: &Options) -> usize {
+    debug_assert_eq!(FORMS[0].1, ThreadForm::Metric);
+    if o.form == ThreadForm::Metric {
+        // An emptied Custom field is still Printed Metric. Only leaving the form drops the clearance.
+        if o.clearance.trim().is_empty() && !o.custom_clearance { 0 } else { PRINTED }
+    } else {
+        FORMS.iter().position(|(_, f)| *f == o.form).map(|i| i + 1).unwrap_or(0)
+    }
+}
+
+/// Apply a Form pick. Printed Metric keeps a metric designation and sets the print clearance.
+/// Any other form drops that clearance. True when the size went back to automatic.
+fn set_form(designation: &mut String, suggested: &mut Option<String>, o: &mut Options, index: usize) -> bool {
+    let printed = index == PRINTED;
+    let to = if index <= PRINTED { ThreadForm::Metric } else { FORMS.get(index - 1).map(|(_, form)| *form).unwrap_or(ThreadForm::Metric) };
+    let mut reset = false;
+    if to != o.form {
+        reset = change_form(designation, suggested, o.form, to);
+        o.form = to;
+    }
+    if printed {
+        o.custom_clearance = false;
+        if o.clearance.trim().is_empty() {
+            o.clearance = PRINTED_CLEARANCE.to_string();
+        }
+    } else {
+        o.clearance.clear();
+        o.custom_clearance = false;
+    }
+    reset
+}
+
+/// Which Tolerance row a clearance shows. A bare number that matches a preset shows that preset.
+/// Anything else, including a unit expression, is Custom. Custom sticks until a preset is picked.
+fn tolerance_index(o: &Options) -> usize {
+    let custom = TOLERANCES.len() - 1;
+    if o.custom_clearance {
+        return custom;
+    }
+    let Ok(v) = o.clearance.trim().parse::<f64>() else { return custom };
+    TOLERANCES
+        .iter()
+        .position(|(_, c)| c.is_some_and(|s| s.parse::<f64>().ok().is_some_and(|p| (p - v).abs() < 1e-6)))
+        .unwrap_or(custom)
+}
+
+/// Tolerance under Form, only for Printed Metric. A preset writes its radial mm. Custom edits it.
+fn tolerance_rows(ui: &mut egui::Ui, o: &mut Options) -> bool {
+    let labels: Vec<&str> = TOLERANCES.iter().map(|(name, _)| *name).collect();
+    let mut index = tolerance_index(o);
+    let before = index;
+    choice_row(ui, "Tolerance", "thread_tolerance", &mut index, &labels);
+    if index != before {
+        match TOLERANCES.get(index).and_then(|(_, clearance)| *clearance) {
+            Some(clearance) => {
+                o.clearance = clearance.to_string();
+                o.custom_clearance = false;
+            }
+            None => o.custom_clearance = true,
+        }
+    }
+    let custom = TOLERANCES.get(index).and_then(|(_, clearance)| clearance.as_ref()).is_none();
+    if custom {
+        o.custom_clearance = true;
+        hint_row(ui, "Clearance", &mut o.clearance, "mm radial")
+    } else {
+        false
+    }
+}
+
 /// A choice row over typed values.
 /// The hole dialog's Hand row for a tapped hole, the same choice the thread dialog offers.
 pub(crate) fn hole_hand_row(ui: &mut egui::Ui, hand: &mut ThreadHand) {
@@ -409,11 +512,17 @@ pub(crate) fn rows(
 ) -> (bool, bool) {
     let mut enter = false;
     let mut reset = false;
-    let mut form = o.form;
-    pick(ui, "Form", "thread_form", &mut form, FORMS);
-    if form != o.form {
-        reset |= change_form(designation, suggested, o.form, form);
-        o.form = form;
+    let labels = form_labels();
+    let mut index = form_index(o);
+    let before_index = index;
+    choice_row(ui, "Form", "thread_form", &mut index, &labels);
+    if index != before_index {
+        reset |= set_form(designation, suggested, o, index);
+    }
+    // A printed thread is cut. The checkbox stays on while this form is selected.
+    if form_index(o) == PRINTED {
+        *modeled = true;
+        enter |= tolerance_rows(ui, o);
     }
     let f = o.form;
 
@@ -423,6 +532,9 @@ pub(crate) fn rows(
         crate::ui_kit::checkbox_grid(ui, &mut [("Modeled", modeled)], 2);
         ui.add_enabled_ui(!designation.trim().is_empty(), |ui| crate::ui_kit::checkbox_grid(ui, &mut [("Automatic size", &mut automatic)], 2));
     });
+    if form_index(o) == PRINTED {
+        *modeled = true;
+    }
     reset |= automatic && !before;
     if automatic != before {
         *suggested = None;
@@ -486,7 +598,17 @@ pub(crate) fn rows(
             enter |= hint_row(ui, "Chamfer Depth", &mut o.chamfer_depth, tr(depth));
         }
         enter |= end_rows(ui, &mut o.ease_out);
+        // A fade is already a runout. The shoulder is the other ending, and only when asked for.
+        ui.add_enabled_ui(!o.ease_out.fade, |ui| {
+            crate::ui_kit::checkbox_grid(ui, &mut [("Runout shoulder", &mut o.shoulder)], 1);
+        });
+        if o.ease_out.fade {
+            o.shoulder = false;
+        }
     });
+    if o.shoulder {
+        *modeled = true;
+    }
     (enter, reset)
 }
 
@@ -618,6 +740,10 @@ pub(crate) fn put_params(p: &mut Value, length: &str, o: &Options, inputs: &[Sel
     if is_buttress(o.form) && o.steep_flank != SteepFlank::default() {
         p["steep_flank"] = json!(o.steep_flank);
     }
+    put(p, &[("clearance", o.clearance.as_str())]);
+    if o.shoulder {
+        p["shoulder"] = json!(true);
+    }
 }
 
 /// The picked Up To place: a plane's name, or a point on a face.
@@ -653,6 +779,8 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, kind: &FeatureKind) {
         chamfer_angle,
         chamfer_depth,
         steep_flank,
+        clearance,
+        shoulder,
         // Kept by the edit itself (`timeline.redefine`), not a dialog option.
         old_auto_size: _,
     } = kind
@@ -678,6 +806,9 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, kind: &FeatureKind) {
         chamfer_angle: chamfer_angle.as_ref().map(expr).unwrap_or_default(),
         chamfer_depth: chamfer_depth.as_ref().map(expr).unwrap_or_default(),
         steep_flank: *steep_flank,
+        clearance: clearance.as_ref().map(expr).unwrap_or_default(),
+        custom_clearance: false,
+        shoulder: *shoulder,
     };
     if let Some(inp) = d.inputs.first_mut() {
         inp.items = face_sel(s, face.0).into_iter().collect();

@@ -963,6 +963,16 @@ pub enum FeatureKind {
         /// was left to the tap drill: a 12 mm hole stays M14 there. New threads leave it off.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         old_auto_size: bool,
+        /// Radial print clearance (mm). External crest and root move in by this much; internal
+        /// crest and root move out. None is the basic profile.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Clearance")]
+        clearance: Option<Expr>,
+        /// A plain neck where a length stops inside the face: 1.5 pitches, just past the root,
+        /// then one square step up to the shaft. Off, the groove stops square, and a printed
+        /// thread is cut off there and joined back.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        shoulder: bool,
     },
     /// Ruled loft through profiles of several sketches, in order.
     Loft {

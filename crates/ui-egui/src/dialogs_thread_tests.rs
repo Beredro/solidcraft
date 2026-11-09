@@ -204,6 +204,55 @@ fn a_form_change_keeps_what_still_applies() {
     assert_eq!((&p["hand"], &p["starts"], &p["length"], &p["ease_out"]), (&json!("left"), &json!(3), &json!("4 mm"), &json!("standard")));
 }
 
+/// Printed Metric is the form beside ISO metric. It keeps the metric profile, turns Modeled on,
+/// and offers printer tolerances. The usual one is 0.2 mm. Custom keeps a typed radial clearance.
+/// ISO metric and the other forms leave both rows out.
+#[test]
+fn printed_metric_sits_beside_iso_metric() {
+    let mut h = shaft();
+    assert!(!shown("Tolerance"), "tolerance belongs to Printed Metric");
+    assert!(!shown("Clearance"), "clearance is the custom tolerance, not its own row");
+    let face = params(&h)["face"].clone();
+    choose(&mut h, "Form", "Printed Metric");
+    let p = params(&h);
+    assert!(p.get("form").is_none(), "printed metric is the metric profile: {p}");
+    assert_eq!(p["clearance"], json!("0.2"));
+    assert_eq!(p["modeled"], json!(true));
+    assert_eq!(p["face"], face);
+    assert!(p.get("designation").is_none(), "the face's size stays automatic");
+    assert!(shown("Tolerance"));
+    assert!(!shown("Clearance"), "a preset shows its number in the tolerance, not a second field");
+    choose(&mut h, "Tolerance", "FDM 0.6 mm (0.30)");
+    assert_eq!(params(&h)["clearance"], json!("0.3"));
+    choose(&mut h, "Tolerance", "Resin (0.10)");
+    assert_eq!(params(&h)["clearance"], json!("0.1"));
+    assert!(!shown("Clearance"));
+    choose(&mut h, "Tolerance", "Custom");
+    assert_eq!(params(&h)["clearance"], json!("0.1"), "custom keeps the number already chosen");
+    assert!(shown("Clearance"));
+    type_in(&mut h, "Clearance", "0.25 mm");
+    assert_eq!(params(&h)["clearance"], json!("0.25 mm"));
+    assert!(shown("Clearance"), "a typed value stays custom when it is not a bare preset number");
+    assert!(params(&h).get("form").is_none());
+    choose(&mut h, "Form", "ISO metric");
+    let back = params(&h);
+    assert!(back.get("clearance").is_none(), "{back}");
+    assert!(!shown("Tolerance"));
+    assert!(!shown("Clearance"));
+    choose(&mut h, "Form", "Printed Metric");
+    assert_eq!(params(&h)["clearance"], json!("0.2"));
+    assert!(params(&h).get("shoulder").is_none(), "the runout shoulder stays off");
+    click(&mut h, &["dialog:Runout shoulder"]);
+    assert_eq!(params(&h)["shoulder"], json!(true));
+    click(&mut h, &["dialog:Runout shoulder"]);
+    assert!(params(&h).get("shoulder").is_none(), "turning the shoulder off leaves it out");
+    choose(&mut h, "Form", "Trapezoidal (ISO 2904)");
+    let other = params(&h);
+    assert_eq!(other["form"], json!("trapezoidal"));
+    assert!(other.get("clearance").is_none(), "{other}");
+    assert!(!shown("Tolerance"));
+}
+
 /// The dialog shows the command's own error text for options it cannot build.
 #[test]
 fn the_command_error_is_what_the_dialog_shows() {
